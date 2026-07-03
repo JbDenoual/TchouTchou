@@ -1,6 +1,6 @@
 import { colorAt } from './quality.js';
 
-const PING_POINT_RADIUS = 18; // 3x la taille initiale (6px)
+const PING_POINT_RADIUS = 9;
 
 export class MapView {
   constructor(elementId) {
