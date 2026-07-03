@@ -22,6 +22,53 @@ function showScreen(id) {
   document.getElementById('tabSettings').classList.toggle('active', id === 'screen-settings');
 }
 
+// ---------- Routage (permet d'utiliser le bouton retour du navigateur) ----------
+
+function route() {
+  if (!currentUser) {
+    showScreen('screen-auth');
+    return;
+  }
+
+  const hash = location.hash || '#home';
+
+  if (hash === '#settings') {
+    loadSettingsIntoForm();
+    showScreen('screen-settings');
+  } else if (hash === '#record') {
+    if (!recorder) {
+      navigate('#home', { replace: true }); // pas d'enregistrement en cours, rien à afficher ici
+      return;
+    }
+    showScreen('screen-record');
+  } else if (hash.startsWith('#review/')) {
+    showScreen('screen-review');
+    loadReview(hash.slice('#review/'.length));
+  } else {
+    showScreen('screen-home');
+    refreshTripList();
+  }
+}
+
+function navigate(hash, { replace = false } = {}) {
+  if (replace) {
+    history.replaceState(null, '', hash);
+  } else if (location.hash !== hash) {
+    history.pushState(null, '', hash);
+  }
+  route();
+}
+
+window.addEventListener('popstate', () => {
+  // Empêche de quitter accidentellement un enregistrement en cours avec le bouton retour.
+  if (recorder && location.hash !== '#record') {
+    history.pushState(null, '', '#record');
+    document.getElementById('recordStatus').textContent = "Arrête l'enregistrement avant de changer d'écran.";
+    return;
+  }
+  route();
+});
+
 // ---------- Auth ----------
 
 document.getElementById('btnSignIn').addEventListener('click', async () => {
@@ -59,24 +106,21 @@ onAuthStateChange((user) => {
   currentUser = user;
   if (user) {
     document.getElementById('userBadge').textContent = user.email;
-    showScreen('screen-home');
-    refreshTripList();
+    if (!location.hash || location.hash === '#auth') {
+      navigate('#home', { replace: true });
+    } else {
+      route();
+    }
   } else {
     document.getElementById('userBadge').textContent = '';
-    showScreen('screen-auth');
+    navigate('#auth', { replace: true });
   }
 });
 
 // ---------- Navigation ----------
 
-document.getElementById('tabHome').addEventListener('click', () => {
-  showScreen('screen-home');
-  refreshTripList();
-});
-document.getElementById('tabSettings').addEventListener('click', () => {
-  loadSettingsIntoForm();
-  showScreen('screen-settings');
-});
+document.getElementById('tabHome').addEventListener('click', () => navigate('#home'));
+document.getElementById('tabSettings').addEventListener('click', () => navigate('#settings'));
 
 // ---------- Accueil / liste des trajets ----------
 
@@ -111,7 +155,7 @@ function buildTripRow(trip) {
     <div class="trip-row__action"></div>
   `;
 
-  row.addEventListener('click', () => openReview(trip));
+  row.addEventListener('click', () => navigate(`#review/${trip.id}`));
   renderDeleteIcon(row, trip);
 
   return row;
@@ -192,11 +236,8 @@ document.getElementById('btnStartTrip').addEventListener('click', async () => {
   if (!currentUser) return;
   const name = document.getElementById('tripNameInput').value.trim();
 
-  showScreen('screen-record');
   if (!recordMapView) recordMapView = new MapView('map');
   recordMapView.clear();
-  document.getElementById('recordStatus').textContent = 'Initialisation…';
-  updateGpsStatus(null, null);
 
   recorder = new Recorder({
     settings,
@@ -215,6 +256,10 @@ document.getElementById('btnStartTrip').addEventListener('click', async () => {
     onPosition: (position, err) => updateGpsStatus(position, err),
   });
 
+  navigate('#record');
+  document.getElementById('recordStatus').textContent = 'Initialisation…';
+  updateGpsStatus(null, null);
+
   await recorder.start(currentUser.id, name);
 });
 
@@ -223,22 +268,20 @@ document.getElementById('btnStopTrip').addEventListener('click', async () => {
   document.getElementById('recordStatus').textContent = 'Synchronisation…';
   await recorder.stop();
   recorder = null;
-  showScreen('screen-home');
-  refreshTripList();
+  navigate('#home', { replace: true });
 });
 
 // ---------- Revue d'un trajet ----------
 
-async function openReview(trip) {
-  currentReviewTripId = trip.id;
+async function loadReview(tripId) {
+  currentReviewTripId = tripId;
   resetDeleteFromReviewButton();
-  showScreen('screen-review');
   document.getElementById('reviewSummary').textContent = 'Chargement…';
   if (!reviewMapView) reviewMapView = new MapView('mapReview');
   reviewMapView.clear();
 
   try {
-    const pings = await getTripPings(trip.id);
+    const pings = await getTripPings(tripId);
     reviewMapView.render(pings, settings);
     const summary = tripSummary(pings, settings);
     document.getElementById('reviewSummary').textContent =
@@ -249,8 +292,7 @@ async function openReview(trip) {
 }
 
 document.getElementById('btnBackFromReview').addEventListener('click', () => {
-  showScreen('screen-home');
-  refreshTripList();
+  history.back();
 });
 
 const btnDeleteFromReview = document.getElementById('btnDeleteFromReview');
@@ -275,8 +317,7 @@ btnDeleteFromReview.addEventListener('click', async () => {
   btnDeleteFromReview.textContent = 'Suppression…';
   try {
     await deleteTrip(currentReviewTripId);
-    showScreen('screen-home');
-    refreshTripList();
+    navigate('#home', { replace: true });
   } catch (err) {
     btnDeleteFromReview.disabled = false;
     btnDeleteFromReview.textContent = `Échec : ${err.message}`;
@@ -306,8 +347,7 @@ document.getElementById('btnSaveSettings').addEventListener('click', () => {
     },
   };
   saveSettings(settings);
-  showScreen('screen-home');
-  refreshTripList();
+  navigate('#home', { replace: true });
 });
 
 // ---------- Démarrage de l'app ----------
@@ -317,9 +357,12 @@ document.getElementById('btnSaveSettings').addEventListener('click', () => {
   currentUser = await getCurrentUser();
   if (currentUser) {
     document.getElementById('userBadge').textContent = currentUser.email;
-    showScreen('screen-home');
-    refreshTripList();
+    if (!location.hash) {
+      navigate('#home', { replace: true });
+    } else {
+      route();
+    }
   } else {
-    showScreen('screen-auth');
+    navigate('#auth', { replace: true });
   }
 })();
