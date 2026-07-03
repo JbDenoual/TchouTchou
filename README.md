@@ -1,4 +1,4 @@
-# TchouTchou5G
+# TchouTchou
 
 App web mobile pour cartographier la qualité du réseau internet le long d'un trajet en train.
 
