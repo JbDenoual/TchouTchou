@@ -6,10 +6,11 @@ import { newTripId, newPingId } from './trips.js';
 const SYNC_INTERVAL_MS = 10000;
 
 export class Recorder {
-  constructor({ settings, onPing, onStatus }) {
+  constructor({ settings, onPing, onStatus, onPosition }) {
     this.settings = settings;
     this.onPing = onPing || (() => {});
     this.onStatus = onStatus || (() => {});
+    this.onPosition = onPosition || (() => {});
     this.pings = [];
     this.tripId = null;
     this.currentPosition = null;
@@ -67,9 +68,12 @@ export class Recorder {
 
   _startGeoWatch() {
     if (!('geolocation' in navigator)) {
-      this.onStatus({ type: 'error', message: 'Géolocalisation indisponible sur cet appareil.' });
+      const err = { code: 0, message: 'Géolocalisation indisponible sur cet appareil.' };
+      this.onStatus({ type: 'error', message: err.message });
+      this.onPosition(null, err);
       return;
     }
+    this.onPosition(null, null); // en attente du premier point tant que watchPosition n'a pas répondu
     this.watchId = navigator.geolocation.watchPosition(
       (pos) => {
         this.currentPosition = {
@@ -77,8 +81,12 @@ export class Recorder {
           lng: pos.coords.longitude,
           accuracy: pos.coords.accuracy,
         };
+        this.onPosition(this.currentPosition, null);
       },
-      (err) => this.onStatus({ type: 'geo-error', message: err.message }),
+      (err) => {
+        this.onStatus({ type: 'geo-error', message: err.message });
+        this.onPosition(this.currentPosition, err);
+      },
       { enableHighAccuracy: true, maximumAge: 2000, timeout: 10000 }
     );
   }

@@ -271,6 +271,14 @@ label {
   background: var(--surface);
 }
 
+.status-bar--gps {
+  font-variant-numeric: tabular-nums;
+}
+
+.status-bar--gps.status-bar--warning {
+  color: var(--orange);
+}
+
 .action-bar {
   padding: 14px 18px;
   border-top: 1px solid var(--border);

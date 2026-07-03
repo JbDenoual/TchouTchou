@@ -160,6 +160,34 @@ function escapeHtml(str) {
 
 // ---------- Démarrage / arrêt d'un enregistrement ----------
 
+function describeGeoError(err) {
+  if (!err) return null;
+  switch (err.code) {
+    case 1:
+      return "accès à la position refusé — autorise la géolocalisation dans les réglages du navigateur";
+    case 2:
+      return 'position indisponible pour le moment';
+    case 3:
+      return 'délai dépassé pour obtenir la position';
+    default:
+      return err.message || 'géolocalisation indisponible';
+  }
+}
+
+function updateGpsStatus(position, err) {
+  const el = document.getElementById('gpsStatus');
+  if (position) {
+    el.textContent = `Position GPS : ${position.lat.toFixed(5)}, ${position.lng.toFixed(5)} (± ${Math.round(position.accuracy)} m)`;
+    el.classList.remove('status-bar--warning');
+    return;
+  }
+  const reason = describeGeoError(err);
+  el.textContent = reason
+    ? `Aucune position GPS captée — ${reason}`
+    : 'Aucune position GPS captée pour le moment…';
+  el.classList.add('status-bar--warning');
+}
+
 document.getElementById('btnStartTrip').addEventListener('click', async () => {
   if (!currentUser) return;
   const name = document.getElementById('tripNameInput').value.trim();
@@ -167,7 +195,8 @@ document.getElementById('btnStartTrip').addEventListener('click', async () => {
   showScreen('screen-record');
   if (!recordMapView) recordMapView = new MapView('map');
   recordMapView.clear();
-  document.getElementById('recordStatus').textContent = 'Acquisition GPS…';
+  document.getElementById('recordStatus').textContent = 'Initialisation…';
+  updateGpsStatus(null, null);
 
   recorder = new Recorder({
     settings,
@@ -183,6 +212,7 @@ document.getElementById('btnStartTrip').addEventListener('click', async () => {
         document.getElementById('recordStatus').textContent = status.message;
       }
     },
+    onPosition: (position, err) => updateGpsStatus(position, err),
   });
 
   await recorder.start(currentUser.id, name);
