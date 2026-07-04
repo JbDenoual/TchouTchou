@@ -3,13 +3,15 @@ import { getSettings, saveSettings } from './settings.js';
 import { listTrips, getTripPings, getTrip, deleteTrip } from './trips.js';
 import { Recorder } from './recorder.js';
 import { MapView } from './mapView.js';
-import { tripSummary } from './quality.js';
+import { tripSummary, colorAt, COLORS } from './quality.js';
 
 let settings = getSettings();
 let recorder = null;
 let reviewMapView = null;
 let currentUser = null;
 let currentTripId = null;
+let currentTripPings = []; // dernier jeu de pings statique chargé, réutilisé pour la prévision
+let forecastDirection = 'aller';
 
 const screens = ['screen-auth', 'screen-home', 'screen-review', 'screen-settings'];
 
@@ -307,6 +309,9 @@ function setLiveState(isLive) {
   }
   document.getElementById('gpsStatus').style.display = isLive ? '' : 'none';
   document.getElementById('reviewDeleteSlot').style.display = isLive ? 'none' : '';
+
+  currentTripPings = isLive ? [] : currentTripPings;
+  renderForecast();
 }
 
 async function loadTripDetail(tripId) {
@@ -315,6 +320,8 @@ async function loadTripDetail(tripId) {
   reviewMapView.clear();
   reviewMapView.invalidate(); // l'écran était caché (display:none) jusqu'ici
   renderReviewDeleteIcon();
+  showDetailTab('record');
+  document.getElementById('departureTime').value = defaultTimeString();
 
   const pingListEl = document.getElementById('pingListReview');
   const isLive = recorder && recorder.tripId === tripId;
@@ -335,10 +342,115 @@ async function loadTripDetail(tripId) {
     reviewMapView.render(pings, settings);
     renderPingList(pingListEl, pings);
     updateStaticSummary(pings);
+    currentTripPings = pings;
+    renderForecast();
   } catch (err) {
     document.getElementById('reviewSummary').textContent = `Erreur : ${err.message}`;
     pingListEl.innerHTML = '';
   }
+}
+
+// ---------- Onglets du détail (Enregistrement / Prévision) ----------
+
+function showDetailTab(tab) {
+  document.querySelectorAll('.detail-tab').forEach((btn) => btn.classList.toggle('active', btn.dataset.tab === tab));
+  document.getElementById('tabRecord').style.display = tab === 'record' ? '' : 'none';
+  document.getElementById('tabForecast').style.display = tab === 'forecast' ? '' : 'none';
+}
+
+document.querySelectorAll('.detail-tab').forEach((btn) => {
+  btn.addEventListener('click', () => showDetailTab(btn.dataset.tab));
+});
+
+// ---------- Prévision du signal sur le reste du trajet ----------
+
+const CATEGORY_INFO = {
+  [COLORS.green]: { label: 'Bon réseau', dotClass: 'dot--green' },
+  [COLORS.yellow]: { label: 'Réseau lent', dotClass: 'dot--yellow' },
+  [COLORS.orange]: { label: 'Réseau instable', dotClass: 'dot--orange' },
+  [COLORS.red]: { label: 'Pas de réseau', dotClass: 'dot--red' },
+};
+
+function defaultTimeString() {
+  const now = new Date();
+  return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+}
+
+function formatHM(date) {
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+// Regroupe les pings consécutifs de même catégorie et calcule la durée de
+// chaque zone à partir des écarts de temps réellement mesurés lors de
+// l'enregistrement (pas de recalcul de vitesse : on reprend le rythme exact).
+function computeForecastSegments(pings, direction, settings) {
+  if (pings.length < 2) return [];
+  const ordered = direction === 'retour' ? [...pings].reverse() : pings;
+  const colors = ordered.map((_, i) => colorAt(ordered, i, settings));
+  const gaps = [];
+  for (let i = 0; i < ordered.length - 1; i++) {
+    gaps.push(Math.abs(new Date(ordered[i + 1].sentAt) - new Date(ordered[i].sentAt)));
+  }
+
+  const segments = [];
+  let i = 0;
+  while (i < ordered.length) {
+    const color = colors[i];
+    let j = i;
+    while (j + 1 < ordered.length && colors[j + 1] === color) j++;
+
+    let durationMs = 0;
+    for (let k = i; k < j; k++) durationMs += gaps[k];
+    if (j < ordered.length - 1) durationMs += gaps[j];
+
+    segments.push({ color, durationMs });
+    i = j + 1;
+  }
+  return segments;
+}
+
+function setDirection(direction) {
+  forecastDirection = direction;
+  document.getElementById('btnDirectionAller').className = `btn ${direction === 'aller' ? 'btn-primary' : 'btn-secondary'}`;
+  document.getElementById('btnDirectionRetour').className = `btn ${direction === 'retour' ? 'btn-primary' : 'btn-secondary'}`;
+  renderForecast();
+}
+
+document.getElementById('btnDirectionAller').addEventListener('click', () => setDirection('aller'));
+document.getElementById('btnDirectionRetour').addEventListener('click', () => setDirection('retour'));
+document.getElementById('departureTime').addEventListener('change', renderForecast);
+
+function renderForecast() {
+  const listEl = document.getElementById('forecastList');
+
+  if (currentTripPings.length < 2) {
+    listEl.innerHTML = recorder
+      ? '<div class="empty-state">Arrête l\'enregistrement pour générer une prévision.</div>'
+      : '<div class="empty-state">Pas assez de données pour générer une prévision.</div>';
+    return;
+  }
+
+  const segments = computeForecastSegments(currentTripPings, forecastDirection, settings);
+  const [h, m] = document.getElementById('departureTime').value.split(':').map(Number);
+  let cursor = new Date();
+  cursor.setHours(h || 0, m || 0, 0, 0);
+
+  listEl.innerHTML = '';
+  segments.forEach((seg) => {
+    const start = new Date(cursor);
+    cursor = new Date(cursor.getTime() + seg.durationMs);
+    const minutes = Math.max(1, Math.round(seg.durationMs / 60000));
+    const info = CATEGORY_INFO[seg.color] || CATEGORY_INFO[COLORS.red];
+
+    const row = document.createElement('div');
+    row.className = 'forecast-row';
+    row.innerHTML = `
+      <span class="forecast-row__time">${formatHM(start)} – ${formatHM(cursor)}</span>
+      <span class="forecast-row__label"><span class="dot ${info.dotClass}"></span> ${info.label}</span>
+      <span class="forecast-row__duration">${minutes} min</span>
+    `;
+    listEl.appendChild(row);
+  });
 }
 
 document.getElementById('btnStartTrip').addEventListener('click', async () => {
@@ -362,9 +474,10 @@ document.getElementById('btnToggleRecording').addEventListener('click', async ()
     await recorder.stop();
     recorder = null;
     btn.disabled = false;
-    setLiveState(false);
 
     const pings = await getTripPings(currentTripId).catch(() => []);
+    currentTripPings = pings;
+    setLiveState(false);
     reviewMapView.render(pings, settings);
     renderPingList(document.getElementById('pingListReview'), pings);
     updateStaticSummary(pings);
