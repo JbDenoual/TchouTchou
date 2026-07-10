@@ -18,14 +18,28 @@ export async function listTrips() {
   return data;
 }
 
+// PostgREST plafonne les résultats à 1000 lignes par requête par défaut, sans
+// erreur ni avertissement. Pour un trajet long (plusieurs heures à un ping
+// toutes les 15s, ça dépasse vite 1000), il faut paginer explicitement pour
+// tout récupérer.
+const PAGE_SIZE = 1000;
+
 export async function getTripPings(tripId) {
-  const { data, error } = await supabase
-    .from('pings')
-    .select('*')
-    .eq('trip_id', tripId)
-    .order('sent_at', { ascending: true });
-  if (error) throw error;
-  return data.map(fromRow);
+  let rows = [];
+  let offset = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from('pings')
+      .select('*')
+      .eq('trip_id', tripId)
+      .order('sent_at', { ascending: true })
+      .range(offset, offset + PAGE_SIZE - 1);
+    if (error) throw error;
+    rows = rows.concat(data);
+    if (data.length < PAGE_SIZE) break;
+    offset += PAGE_SIZE;
+  }
+  return rows.map(fromRow);
 }
 
 export async function getTrip(tripId) {
