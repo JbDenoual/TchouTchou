@@ -289,7 +289,10 @@ function buildRecordCallbacks(pingListEl) {
         document.getElementById('reviewSummary').textContent = status.message;
       }
     },
-    onPosition: (position, err) => updateGpsStatus(position, err),
+    onPosition: (position, err) => {
+      updateGpsStatus(position, err);
+      if (position) reviewMapView.setCurrentPosition(position.lat, position.lng);
+    },
   };
 }
 
@@ -309,6 +312,7 @@ function setLiveState(isLive) {
   }
   document.getElementById('gpsStatus').style.display = isLive ? '' : 'none';
   document.getElementById('reviewDeleteSlot').style.display = isLive ? 'none' : '';
+  if (!isLive) reviewMapView.clearCurrentPosition();
 
   currentTripPings = isLive ? [] : currentTripPings;
   renderForecast();

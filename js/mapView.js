@@ -12,6 +12,7 @@ export class MapView {
 
     this.segmentLayers = [];
     this.hasFitOnce = false;
+    this.currentPositionMarker = null;
   }
 
   clear() {
@@ -72,6 +73,31 @@ export class MapView {
   // À appeler juste après que l'écran devient visible.
   invalidate() {
     this.map.invalidateSize();
+  }
+
+  // Marqueur "vous êtes ici", distinct des points de ping — mis à jour en
+  // place à chaque nouvelle position plutôt que recréé.
+  setCurrentPosition(lat, lng) {
+    const latlng = [lat, lng];
+    if (this.currentPositionMarker) {
+      this.currentPositionMarker.setLatLng(latlng);
+      return;
+    }
+    this.currentPositionMarker = L.circleMarker(latlng, {
+      radius: 9,
+      color: '#ffffff',
+      weight: 3,
+      fillColor: '#4285f4',
+      fillOpacity: 1,
+    }).addTo(this.map);
+    this.currentPositionMarker.bringToFront();
+  }
+
+  clearCurrentPosition() {
+    if (this.currentPositionMarker) {
+      this.map.removeLayer(this.currentPositionMarker);
+      this.currentPositionMarker = null;
+    }
   }
 }
 
