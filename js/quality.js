@@ -36,6 +36,15 @@ export function colorAt(pings, index, settings) {
   return colorForWindow(win, settings.thresholds);
 }
 
+// Ordre des catégories du meilleur au pire réseau, utilisé pour regrouper
+// des zones de catégories voisines (ex: bon/lent qui alternent).
+export const CATEGORY_ORDER = [COLORS.green, COLORS.yellow, COLORS.orange, COLORS.red];
+
+export function categoryRank(color) {
+  const rank = CATEGORY_ORDER.indexOf(color);
+  return rank === -1 ? CATEGORY_ORDER.length - 1 : rank;
+}
+
 export function tripSummary(pings, settings) {
   const counts = { red: 0, orange: 0, yellow: 0, green: 0 };
   const nameByColor = { [COLORS.red]: 'red', [COLORS.orange]: 'orange', [COLORS.yellow]: 'yellow', [COLORS.green]: 'green' };

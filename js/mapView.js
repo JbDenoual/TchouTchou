@@ -62,6 +62,44 @@ export class MapView {
     }
   }
 
+  // Affiche les zones regroupées de la prévision (pas les pings un par un) :
+  // un segment épais par groupe, coloré par la fonction fournie par l'appelant
+  // (mélange de couleurs pour une zone à deux catégories).
+  renderGrouped(orderedPings, groups, colorForGroup) {
+    this.clear();
+    const positions = orderedPings.map(pointOf).filter(Boolean);
+    if (positions.length === 0) return;
+
+    groups.forEach((group) => {
+      const points = [];
+      for (let i = group.startIndex; i <= group.endIndex; i++) {
+        const pos = pointOf(orderedPings[i]);
+        if (pos) points.push(pos);
+      }
+      if (points.length < 2) {
+        if (points.length === 1) {
+          const marker = L.circleMarker(points[0], {
+            radius: PING_POINT_RADIUS,
+            color: colorForGroup(group),
+            weight: 1,
+            fillColor: colorForGroup(group),
+            fillOpacity: 0.9,
+          }).addTo(this.map);
+          this.segmentLayers.push(marker);
+        }
+        return;
+      }
+      const line = L.polyline(points, { color: colorForGroup(group), weight: 8, opacity: 0.9 }).addTo(this.map);
+      this.segmentLayers.push(line);
+    });
+
+    const bounds = L.latLngBounds(positions);
+    if (!this.hasFitOnce) {
+      this.map.fitBounds(bounds, { maxZoom: 14 });
+      this.hasFitOnce = true;
+    }
+  }
+
   // Pendant l'enregistrement, on recentre en continu sur le dernier point.
   panTo(ping) {
     const pos = pointOf(ping);

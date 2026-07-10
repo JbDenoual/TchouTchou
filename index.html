@@ -58,19 +58,19 @@
 
     <!-- Détail d'un trajet : revue et contrôle de l'enregistrement -->
     <section id="screen-review" class="screen screen-map">
-      <div id="mapReview" style="flex:1;"></div>
+      <div class="detail-tabs">
+        <button type="button" class="detail-tab active" data-tab="record">Enregistrement</button>
+        <button type="button" class="detail-tab" data-tab="forecast">Prévision</button>
+      </div>
       <div class="legend">
         <span class="legend__item"><span class="dot dot--green"></span>Bon</span>
         <span class="legend__item"><span class="dot dot--yellow"></span>Lent</span>
         <span class="legend__item"><span class="dot dot--orange"></span>Instable</span>
         <span class="legend__item"><span class="dot dot--red"></span>Coupé</span>
       </div>
-      <div class="detail-tabs">
-        <button type="button" class="detail-tab active" data-tab="record">Enregistrement</button>
-        <button type="button" class="detail-tab" data-tab="forecast">Prévision</button>
-      </div>
 
       <div id="tabRecord" class="tab-panel">
+        <div id="mapRecord" class="detail-map"></div>
         <div id="gpsStatus" class="status-bar status-bar--gps" style="display:none;">Position GPS : initialisation…</div>
         <div class="status-bar review-summary-row">
           <span id="reviewSummary"></span>
@@ -86,6 +86,7 @@
       </div>
 
       <div id="tabForecast" class="tab-panel" style="display:none;">
+        <div id="mapForecast" class="detail-map"></div>
         <div class="forecast-controls">
           <label>Sens du trajet</label>
           <div class="direction-toggle">

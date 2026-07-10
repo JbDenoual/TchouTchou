@@ -106,9 +106,9 @@ h1, h2, h3 {
   gap: 0;
 }
 
-#mapReview {
+.detail-map {
   flex: 1;
-  min-height: 300px;
+  min-height: 200px;
   background: var(--surface);
 }
 
@@ -372,8 +372,10 @@ label {
   flex-shrink: 0;
   font-weight: 550;
 }
-.ping-row__latency--ok { color: var(--green); }
-.ping-row__latency--fail { color: var(--red); }
+.ping-row__latency--green { color: var(--green); }
+.ping-row__latency--yellow { color: var(--yellow); }
+.ping-row__latency--orange { color: var(--orange); }
+.ping-row__latency--red { color: var(--red); }
 
 /* ---------- Trip list ---------- */
 
@@ -502,6 +504,8 @@ nav.tabs button.active {
 .tab-panel {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
 }
 
 /* ---------- Prévision ---------- */

@@ -3,11 +3,12 @@ import { getSettings, saveSettings } from './settings.js';
 import { listTrips, getTripPings, getTrip, deleteTrip } from './trips.js';
 import { Recorder } from './recorder.js';
 import { MapView } from './mapView.js';
-import { tripSummary, colorAt, COLORS } from './quality.js';
+import { tripSummary, colorAt, COLORS, categoryRank } from './quality.js';
 
 let settings = getSettings();
 let recorder = null;
-let reviewMapView = null;
+let recordMapView = null;
+let forecastMapView = null;
 let currentUser = null;
 let currentTripId = null;
 let currentTripPings = []; // dernier jeu de pings statique chargé, réutilisé pour la prévision
@@ -208,11 +209,18 @@ function formatPingPosition(ping) {
   return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
 }
 
-function buildPingRow(ping) {
+const LATENCY_CLASS_BY_COLOR = {
+  [COLORS.green]: 'ping-row__latency--green',
+  [COLORS.yellow]: 'ping-row__latency--yellow',
+  [COLORS.orange]: 'ping-row__latency--orange',
+  [COLORS.red]: 'ping-row__latency--red',
+};
+
+function buildPingRow(ping, color) {
   const row = document.createElement('div');
   row.className = 'ping-row';
   const time = new Date(ping.sentAt).toLocaleTimeString('fr-FR');
-  const latencyClass = ping.success ? 'ping-row__latency--ok' : 'ping-row__latency--fail';
+  const latencyClass = LATENCY_CLASS_BY_COLOR[color] || 'ping-row__latency--red';
   const latencyText = ping.success ? `${ping.elapsedMs} ms` : 'Échec';
 
   row.innerHTML = `
@@ -229,7 +237,7 @@ function renderPingList(container, pings) {
     return;
   }
   container.innerHTML = '';
-  pings.forEach((ping) => container.appendChild(buildPingRow(ping)));
+  pings.forEach((ping, i) => container.appendChild(buildPingRow(ping, colorAt(pings, i, settings))));
 }
 
 // ---------- Détail d'un trajet (carte + contrôle de l'enregistrement) ----------
@@ -278,8 +286,8 @@ function updateStaticSummary(pings) {
 function buildRecordCallbacks(pingListEl) {
   return {
     onPing: (ping, allPings) => {
-      reviewMapView.render(allPings, settings);
-      reviewMapView.panTo(ping);
+      recordMapView.render(allPings, settings);
+      recordMapView.panTo(ping);
       updateLiveSummary(allPings, ping);
       renderPingList(pingListEl, allPings);
       pingListEl.scrollTop = pingListEl.scrollHeight;
@@ -291,7 +299,7 @@ function buildRecordCallbacks(pingListEl) {
     },
     onPosition: (position, err) => {
       updateGpsStatus(position, err);
-      if (position) reviewMapView.setCurrentPosition(position.lat, position.lng);
+      if (position) recordMapView.setCurrentPosition(position.lat, position.lng);
     },
   };
 }
@@ -312,7 +320,7 @@ function setLiveState(isLive) {
   }
   document.getElementById('gpsStatus').style.display = isLive ? '' : 'none';
   document.getElementById('reviewDeleteSlot').style.display = isLive ? 'none' : '';
-  if (!isLive) reviewMapView.clearCurrentPosition();
+  if (!isLive) recordMapView.clearCurrentPosition();
 
   currentTripPings = isLive ? [] : currentTripPings;
   renderForecast();
@@ -320,11 +328,11 @@ function setLiveState(isLive) {
 
 async function loadTripDetail(tripId) {
   currentTripId = tripId;
-  if (!reviewMapView) reviewMapView = new MapView('mapReview');
-  reviewMapView.clear();
-  reviewMapView.invalidate(); // l'écran était caché (display:none) jusqu'ici
+  showDetailTab('record'); // rend le conteneur visible avant de (re)mesurer la carte
+  if (!recordMapView) recordMapView = new MapView('mapRecord');
+  recordMapView.clear();
+  recordMapView.invalidate(); // l'écran était caché (display:none) jusqu'ici
   renderReviewDeleteIcon();
-  showDetailTab('record');
   document.getElementById('departureTime').value = defaultTimeString();
 
   const pingListEl = document.getElementById('pingListReview');
@@ -332,7 +340,7 @@ async function loadTripDetail(tripId) {
   setLiveState(isLive);
 
   if (isLive) {
-    reviewMapView.render(recorder.pings, settings);
+    recordMapView.render(recorder.pings, settings);
     renderPingList(pingListEl, recorder.pings);
     pingListEl.scrollTop = pingListEl.scrollHeight;
     updateLiveSummary(recorder.pings);
@@ -343,7 +351,7 @@ async function loadTripDetail(tripId) {
   pingListEl.innerHTML = '<div class="empty-state">Chargement…</div>';
   try {
     const pings = await getTripPings(tripId);
-    reviewMapView.render(pings, settings);
+    recordMapView.render(pings, settings);
     renderPingList(pingListEl, pings);
     updateStaticSummary(pings);
     currentTripPings = pings;
@@ -360,6 +368,17 @@ function showDetailTab(tab) {
   document.querySelectorAll('.detail-tab').forEach((btn) => btn.classList.toggle('active', btn.dataset.tab === tab));
   document.getElementById('tabRecord').style.display = tab === 'record' ? '' : 'none';
   document.getElementById('tabForecast').style.display = tab === 'forecast' ? '' : 'none';
+  // Le conteneur qui vient d'être révélé (display:none -> visible) doit se
+  // remesurer, sinon Leaflet garde la taille (souvent nulle) qu'il avait à sa
+  // création. Si la carte de prévision avait été construite/ajustée pendant
+  // qu'elle était encore cachée, on force un nouveau cadrage maintenant
+  // qu'elle est réellement visible.
+  if (tab === 'record' && recordMapView) recordMapView.invalidate();
+  if (tab === 'forecast' && forecastMapView) {
+    forecastMapView.invalidate();
+    forecastMapView.hasFitOnce = false;
+    renderForecast();
+  }
 }
 
 document.querySelectorAll('.detail-tab').forEach((btn) => {
@@ -387,8 +406,7 @@ function formatHM(date) {
 // Regroupe les pings consécutifs de même catégorie et calcule la durée de
 // chaque zone à partir des écarts de temps réellement mesurés lors de
 // l'enregistrement (pas de recalcul de vitesse : on reprend le rythme exact).
-function computeForecastSegments(pings, direction, settings) {
-  if (pings.length < 2) return [];
+function computeRawSegments(pings, direction, settings) {
   const ordered = direction === 'retour' ? [...pings].reverse() : pings;
   const colors = ordered.map((_, i) => colorAt(ordered, i, settings));
   const gaps = [];
@@ -407,10 +425,60 @@ function computeForecastSegments(pings, direction, settings) {
     for (let k = i; k < j; k++) durationMs += gaps[k];
     if (j < ordered.length - 1) durationMs += gaps[j];
 
-    segments.push({ color, durationMs });
+    segments.push({ color, durationMs, startIndex: i, endIndex: j });
     i = j + 1;
   }
-  return segments;
+  return { ordered, segments };
+}
+
+// Fusionne les zones courtes qui alternent entre deux catégories voisines
+// (ex: bon/lent, lent/instable) en une seule zone "X à Y" — l'objectif est
+// de réduire les allers-retours de quelques minutes plutôt que de les lister
+// un par un. On ne fusionne que si la nouvelle zone reste au plus 2 (rangs
+// adjacents), et seulement quand l'un des deux côtés est encore "court".
+function mergeAdjacentSegments(segments, thresholdMs) {
+  if (segments.length === 0) return [];
+  const first = segments[0];
+  const groups = [{ ...first, minRank: categoryRank(first.color), maxRank: categoryRank(first.color) }];
+
+  for (let i = 1; i < segments.length; i++) {
+    const seg = segments[i];
+    const segRank = categoryRank(seg.color);
+    const group = groups[groups.length - 1];
+    const newMin = Math.min(group.minRank, segRank);
+    const newMax = Math.max(group.maxRank, segRank);
+    const canMerge = newMax - newMin <= 1 && (seg.durationMs < thresholdMs || group.durationMs < thresholdMs);
+
+    if (canMerge) {
+      group.durationMs += seg.durationMs;
+      group.endIndex = seg.endIndex;
+      group.minRank = newMin;
+      group.maxRank = newMax;
+    } else {
+      groups.push({ ...seg, minRank: segRank, maxRank: segRank });
+    }
+  }
+  return groups;
+}
+
+const CATEGORY_ADJ = { [COLORS.green]: 'bon', [COLORS.yellow]: 'lent', [COLORS.orange]: 'instable', [COLORS.red]: 'coupé' };
+const RANK_COLOR = [COLORS.green, COLORS.yellow, COLORS.orange, COLORS.red];
+
+function groupLabel(group) {
+  if (group.minRank === group.maxRank) return CATEGORY_INFO[RANK_COLOR[group.minRank]].label;
+  return `Réseau ${CATEGORY_ADJ[RANK_COLOR[group.minRank]]} à ${CATEGORY_ADJ[RANK_COLOR[group.maxRank]]}`;
+}
+
+function hexToRgb(hex) {
+  const n = parseInt(hex.replace('#', ''), 16);
+  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+}
+
+function groupColor(group) {
+  if (group.minRank === group.maxRank) return RANK_COLOR[group.minRank];
+  const a = hexToRgb(RANK_COLOR[group.minRank]);
+  const b = hexToRgb(RANK_COLOR[group.maxRank]);
+  return `rgb(${Math.round((a.r + b.r) / 2)}, ${Math.round((a.g + b.g) / 2)}, ${Math.round((a.b + b.b) / 2)})`;
 }
 
 function setDirection(direction) {
@@ -431,30 +499,37 @@ function renderForecast() {
     listEl.innerHTML = recorder
       ? '<div class="empty-state">Arrête l\'enregistrement pour générer une prévision.</div>'
       : '<div class="empty-state">Pas assez de données pour générer une prévision.</div>';
+    if (forecastMapView) forecastMapView.clear();
     return;
   }
 
-  const segments = computeForecastSegments(currentTripPings, forecastDirection, settings);
+  const { ordered, segments } = computeRawSegments(currentTripPings, forecastDirection, settings);
+  const thresholdMs = settings.rollingWindowSize * settings.pingIntervalMs * 2;
+  const groups = mergeAdjacentSegments(segments, thresholdMs);
+
   const [h, m] = document.getElementById('departureTime').value.split(':').map(Number);
   let cursor = new Date();
   cursor.setHours(h || 0, m || 0, 0, 0);
 
   listEl.innerHTML = '';
-  segments.forEach((seg) => {
+  groups.forEach((group) => {
     const start = new Date(cursor);
-    cursor = new Date(cursor.getTime() + seg.durationMs);
-    const minutes = Math.max(1, Math.round(seg.durationMs / 60000));
-    const info = CATEGORY_INFO[seg.color] || CATEGORY_INFO[COLORS.red];
+    cursor = new Date(cursor.getTime() + group.durationMs);
+    const minutes = Math.max(1, Math.round(group.durationMs / 60000));
+    const color = groupColor(group);
 
     const row = document.createElement('div');
     row.className = 'forecast-row';
     row.innerHTML = `
       <span class="forecast-row__time">${formatHM(start)} – ${formatHM(cursor)}</span>
-      <span class="forecast-row__label"><span class="dot ${info.dotClass}"></span> ${info.label}</span>
+      <span class="forecast-row__label"><span class="dot" style="background:${color}"></span> ${groupLabel(group)}</span>
       <span class="forecast-row__duration">${minutes} min</span>
     `;
     listEl.appendChild(row);
   });
+
+  if (!forecastMapView) forecastMapView = new MapView('mapForecast');
+  forecastMapView.renderGrouped(ordered, groups, (g) => groupColor(g));
 }
 
 document.getElementById('btnStartTrip').addEventListener('click', async () => {
@@ -482,7 +557,7 @@ document.getElementById('btnToggleRecording').addEventListener('click', async ()
     const pings = await getTripPings(currentTripId).catch(() => []);
     currentTripPings = pings;
     setLiveState(false);
-    reviewMapView.render(pings, settings);
+    recordMapView.render(pings, settings);
     renderPingList(document.getElementById('pingListReview'), pings);
     updateStaticSummary(pings);
     return;
@@ -508,7 +583,7 @@ document.getElementById('btnToggleRecording').addEventListener('click', async ()
 
   setLiveState(true);
   updateGpsStatus(null, null);
-  reviewMapView.render(existingPings, settings);
+  recordMapView.render(existingPings, settings);
   renderPingList(document.getElementById('pingListReview'), existingPings);
 
   btn.disabled = false;
