@@ -434,12 +434,41 @@ function denoiseIsolatedPings(colors) {
   return result;
 }
 
+// La fenêtre glissante regarde en arrière : juste après la fin d'une
+// mauvaise passe, il faut plusieurs pings propres avant qu'elle ne "se
+// nettoie" complètement — des pings réellement bons restent alors comptés
+// dans la zone qui se termine. On corrige en rattachant les derniers pings
+// d'une zone à la zone suivante (meilleure) s'ils sont, à titre individuel,
+// déjà au niveau de celle-ci.
+function trimTrailingRecovery(colors, ordered) {
+  const result = [...colors];
+  let i = 0;
+  while (i < result.length) {
+    let j = i;
+    while (j + 1 < result.length && result[j + 1] === result[i]) j++;
+
+    if (j + 1 < result.length) {
+      const nextColor = result[j + 1];
+      if (categoryRank(nextColor) < categoryRank(result[i])) {
+        let k = j;
+        while (k >= i && categoryRank(pingOwnColor(ordered[k])) <= categoryRank(nextColor)) {
+          result[k] = nextColor;
+          k--;
+        }
+      }
+    }
+    i = j + 1;
+  }
+  return result;
+}
+
 // Regroupe les pings consécutifs de même catégorie et calcule la durée de
 // chaque zone à partir des écarts de temps réellement mesurés lors de
 // l'enregistrement (pas de recalcul de vitesse : on reprend le rythme exact).
 function computeRawSegments(pings, direction, settings) {
   const ordered = direction === 'retour' ? [...pings].reverse() : pings;
-  const colors = denoiseIsolatedPings(ordered.map((_, i) => colorAt(ordered, i, settings)));
+  let colors = denoiseIsolatedPings(ordered.map((_, i) => colorAt(ordered, i, settings)));
+  colors = trimTrailingRecovery(colors, ordered);
   const gaps = [];
   for (let i = 0; i < ordered.length - 1; i++) {
     gaps.push(Math.abs(new Date(ordered[i + 1].sentAt) - new Date(ordered[i].sentAt)));
