@@ -413,12 +413,33 @@ function formatHM(date) {
   return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
 }
 
+// Un ping isolé qui tranche avec ses voisins immédiats (ex: 3 bons, 1
+// instable, 3 bons) est ignoré pour le regroupement : s'il diffère des 3
+// pings précédents ET des 3 pings suivants, alors que ceux-ci sont tous
+// identiques entre eux, on l'absorbe dans la catégorie environnante plutôt
+// que de créer une zone à part pour un seul point de bruit.
+const NOISE_CONTEXT_SIZE = 3;
+
+function denoiseIsolatedPings(colors) {
+  const result = [...colors];
+  for (let i = NOISE_CONTEXT_SIZE; i < colors.length - NOISE_CONTEXT_SIZE; i++) {
+    const before = colors.slice(i - NOISE_CONTEXT_SIZE, i);
+    const after = colors.slice(i + 1, i + 1 + NOISE_CONTEXT_SIZE);
+    const beforeUniform = before.every((c) => c === before[0]);
+    const afterUniform = after.every((c) => c === after[0]);
+    if (beforeUniform && afterUniform && before[0] === after[0] && colors[i] !== before[0]) {
+      result[i] = before[0];
+    }
+  }
+  return result;
+}
+
 // Regroupe les pings consécutifs de même catégorie et calcule la durée de
 // chaque zone à partir des écarts de temps réellement mesurés lors de
 // l'enregistrement (pas de recalcul de vitesse : on reprend le rythme exact).
 function computeRawSegments(pings, direction, settings) {
   const ordered = direction === 'retour' ? [...pings].reverse() : pings;
-  const colors = ordered.map((_, i) => colorAt(ordered, i, settings));
+  const colors = denoiseIsolatedPings(ordered.map((_, i) => colorAt(ordered, i, settings)));
   const gaps = [];
   for (let i = 0; i < ordered.length - 1; i++) {
     gaps.push(Math.abs(new Date(ordered[i + 1].sentAt) - new Date(ordered[i].sentAt)));
