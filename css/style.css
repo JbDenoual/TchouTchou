@@ -528,16 +528,26 @@ nav.tabs button.active {
   margin-top: 0;
 }
 
+.forecast-group {
+  border-top: 1px solid var(--border);
+}
+.forecast-group:first-child { border-top: none; }
+
 .forecast-row {
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 10px 18px;
   font-size: 13px;
-  border-top: 1px solid var(--border);
   font-variant-numeric: tabular-nums;
 }
-.forecast-row:first-child { border-top: none; }
+
+.forecast-row--clickable {
+  cursor: pointer;
+}
+.forecast-row--clickable:hover {
+  background: var(--surface-hover);
+}
 
 .forecast-row__time {
   color: var(--text-tertiary);
@@ -560,4 +570,23 @@ nav.tabs button.active {
 .forecast-row__duration {
   color: var(--text-secondary);
   flex-shrink: 0;
+}
+
+.forecast-row__chevron {
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+  transition: transform 0.15s ease;
+}
+
+.forecast-row--open .forecast-row__chevron {
+  transform: rotate(180deg);
+}
+
+.forecast-group__detail {
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+}
+
+.forecast-group__detail .ping-row {
+  padding-left: 30px;
 }

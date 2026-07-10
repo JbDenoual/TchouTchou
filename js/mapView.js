@@ -60,6 +60,11 @@ export class MapView {
       this.map.fitBounds(bounds, { maxZoom: 14 });
       this.hasFitOnce = true;
     }
+
+    // render() redessine les pings par-dessus tout ce qui existait déjà —
+    // sans ça, le marqueur de position (ajouté avant) se retrouve enterré
+    // sous les nouveaux points à chaque ping.
+    if (this.currentPositionMarker) this.currentPositionMarker.bringToFront();
   }
 
   // Affiche les zones regroupées de la prévision (pas les pings un par un) :
@@ -119,15 +124,15 @@ export class MapView {
     const latlng = [lat, lng];
     if (this.currentPositionMarker) {
       this.currentPositionMarker.setLatLng(latlng);
-      return;
+    } else {
+      this.currentPositionMarker = L.circleMarker(latlng, {
+        radius: 9,
+        color: '#ffffff',
+        weight: 3,
+        fillColor: '#4285f4',
+        fillOpacity: 1,
+      }).addTo(this.map);
     }
-    this.currentPositionMarker = L.circleMarker(latlng, {
-      radius: 9,
-      color: '#ffffff',
-      weight: 3,
-      fillColor: '#4285f4',
-      fillOpacity: 1,
-    }).addTo(this.map);
     this.currentPositionMarker.bringToFront();
   }
 

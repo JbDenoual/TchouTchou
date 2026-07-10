@@ -470,6 +470,26 @@ function mergeAdjacentSegments(segments, thresholdMs) {
   return groups;
 }
 
+// Deux groupes voisins peuvent porter le même intitulé (ex: deux zones
+// "Réseau bon à lent" qui se suivent) si la première a été refermée à cause
+// du seuil de durée avant que la seconde ne commence. Comme le libellé et la
+// couleur seraient identiques, autant les fusionner en une seule entrée.
+function mergeIdenticalAdjacentGroups(groups) {
+  if (groups.length === 0) return [];
+  const result = [{ ...groups[0] }];
+  for (let i = 1; i < groups.length; i++) {
+    const g = groups[i];
+    const last = result[result.length - 1];
+    if (g.minRank === last.minRank && g.maxRank === last.maxRank) {
+      last.durationMs += g.durationMs;
+      last.endIndex = g.endIndex;
+    } else {
+      result.push({ ...g });
+    }
+  }
+  return result;
+}
+
 const CATEGORY_ADJ = { [COLORS.green]: 'bon', [COLORS.yellow]: 'lent', [COLORS.orange]: 'instable', [COLORS.red]: 'coupé' };
 const RANK_COLOR = [COLORS.green, COLORS.yellow, COLORS.orange, COLORS.red];
 
@@ -514,7 +534,7 @@ function renderForecast() {
 
   const { ordered, segments } = computeRawSegments(currentTripPings, forecastDirection, settings);
   const thresholdMs = settings.rollingWindowSize * settings.pingIntervalMs * 2;
-  const groups = mergeAdjacentSegments(segments, thresholdMs);
+  const groups = mergeIdenticalAdjacentGroups(mergeAdjacentSegments(segments, thresholdMs));
 
   const [h, m] = document.getElementById('departureTime').value.split(':').map(Number);
   let cursor = new Date();
@@ -525,20 +545,54 @@ function renderForecast() {
     const start = new Date(cursor);
     cursor = new Date(cursor.getTime() + group.durationMs);
     const minutes = Math.max(1, Math.round(group.durationMs / 60000));
-    const color = groupColor(group);
-
-    const row = document.createElement('div');
-    row.className = 'forecast-row';
-    row.innerHTML = `
-      <span class="forecast-row__time">${formatHM(start)} – ${formatHM(cursor)}</span>
-      <span class="forecast-row__label"><span class="dot" style="background:${color}"></span> ${groupLabel(group)}</span>
-      <span class="forecast-row__duration">${minutes} min</span>
-    `;
-    listEl.appendChild(row);
+    listEl.appendChild(buildForecastGroupEl(group, ordered, start, new Date(cursor), minutes));
   });
 
   if (!forecastMapView) forecastMapView = new MapView('mapForecast');
   forecastMapView.renderGrouped(ordered, groups, (g) => groupColor(g));
+}
+
+// Ligne de groupe repliable : un clic déplie le détail des pings bruts
+// couverts par ce groupe (heure, position, temps de réponse).
+function buildForecastGroupEl(group, ordered, start, end, minutes) {
+  const color = groupColor(group);
+  const wrapper = document.createElement('div');
+  wrapper.className = 'forecast-group';
+
+  const row = document.createElement('div');
+  row.className = 'forecast-row forecast-row--clickable';
+  row.innerHTML = `
+    <span class="forecast-row__time">${formatHM(start)} – ${formatHM(end)}</span>
+    <span class="forecast-row__label"><span class="dot" style="background:${color}"></span> ${groupLabel(group)}</span>
+    <span class="forecast-row__duration">${minutes} min</span>
+    <svg viewBox="0 0 24 24" class="icon forecast-row__chevron" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+  `;
+
+  const detail = document.createElement('div');
+  detail.className = 'forecast-group__detail';
+  detail.style.display = 'none';
+
+  row.addEventListener('click', () => {
+    const isOpen = detail.style.display !== 'none';
+    if (isOpen) {
+      detail.style.display = 'none';
+      row.classList.remove('forecast-row--open');
+      return;
+    }
+    if (!detail.dataset.built) {
+      for (let i = group.startIndex; i <= group.endIndex; i++) {
+        const ping = ordered[i];
+        detail.appendChild(buildPingRow(ping, pingOwnColor(ping)));
+      }
+      detail.dataset.built = '1';
+    }
+    detail.style.display = '';
+    row.classList.add('forecast-row--open');
+  });
+
+  wrapper.appendChild(row);
+  wrapper.appendChild(detail);
+  return wrapper;
 }
 
 document.getElementById('btnStartTrip').addEventListener('click', async () => {
